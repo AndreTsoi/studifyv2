@@ -1,0 +1,33 @@
+{
+  "name": "study-analyzer",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1",
+    "build": "next build",
+    "start": "next start --hostname 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --experimental-test-isolation=none --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "docx": "latest",
+    "framer-motion": "latest",
+    "jspdf": "latest",
+    "lucide-react": "latest",
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "recharts": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@playwright/test": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "prettier": "^3.9.6",
+    "tsx": "latest",
+    "typescript": "^6.0.3"
+  },
+  "type": "module"
+}
