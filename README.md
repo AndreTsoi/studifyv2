@@ -1,4 +1,4 @@
-# Study Journal
+# Studify
 
 **Turn your study reflections into a clearer next step.**
 
