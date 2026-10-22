@@ -39,6 +39,40 @@ export type Entry = z.infer<typeof entrySchema>;
 export type Journal = z.infer<typeof journalSchema>;
 export type Reflection = z.infer<typeof reflectionSchema>;
 export const JOURNAL_KEY = "study-journal.v2";
+export const BACKUP_KEY = "studify-last-backup";
+export const BACKUP_SNOOZE_KEY = "studify-backup-snooze";
+export const backupRecordSchema = z.object({
+  at: z.iso.datetime(),
+  entries: z.number().int().min(0),
+});
+export type BackupRecord = z.infer<typeof backupRecordSchema>;
+// "all" clears entries but keeps remembered locations, methods, and courses.
+export function removeEntries(journal: Journal, ids: string[] | "all"): Journal {
+  return {
+    ...journal,
+    entries:
+      ids === "all" ? [] : journal.entries.filter((e) => !ids.includes(e.id)),
+  };
+}
+// Entries created since the last backup, and whether Home should nudge.
+export function backupStatus(
+  entries: Entry[],
+  last: BackupRecord | null,
+  snoozedUntil: string | null,
+  now = new Date(),
+) {
+  const unsaved = last
+    ? entries.filter((e) => e.date > last.at).length
+    : entries.length;
+  const days = last
+    ? Math.floor((now.getTime() - Date.parse(last.at)) / 86400000)
+    : Infinity;
+  const snoozed = snoozedUntil !== null && now.toISOString() < snoozedUntil;
+  const remind =
+    !snoozed &&
+    (last ? unsaved > 0 && (days >= 7 || unsaved >= 10) : entries.length >= 3);
+  return { unsaved, remind };
+}
 export function download(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

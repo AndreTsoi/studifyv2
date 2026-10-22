@@ -7,6 +7,8 @@ import {
   sampleJournal,
   contextGroups,
   entryDay,
+  removeEntries,
+  backupStatus,
 } from "../lib/journal.ts";
 import { aiRequestSchema, validateEvidence } from "../lib/ai-contract.ts";
 test("journal needs context, location, method, and reflection but not course or duration", () => {
@@ -88,4 +90,33 @@ test("AI requests require enough entries for patterns and bound input", () => {
     }).success,
     false,
   );
+});
+test("deleting entries keeps the rest and remembered labels", () => {
+  const data = sampleJournal();
+  const [first, ...rest] = data.entries;
+  assert.deepEqual(
+    removeEntries(data, [first.id]).entries.map((e) => e.id),
+    rest.map((e) => e.id),
+  );
+  const cleared = removeEntries(data, "all");
+  assert.equal(cleared.entries.length, 0);
+  assert.deepEqual(cleared.locations, data.locations);
+  assert.ok(journalSchema.safeParse(cleared).success);
+});
+test("backup reminders follow unsaved entries and respect snoozing", () => {
+  const entries = sampleJournal().entries; // today, 1 and 2 days ago
+  const now = new Date(entries[0].date);
+  assert.equal(backupStatus(entries.slice(0, 2), null, null, now).remind, false);
+  assert.equal(backupStatus(entries, null, null, now).remind, true);
+  const backedUp = {
+    at: new Date(Date.parse(entries[1].date) - 1000).toISOString(),
+    entries: 1,
+  };
+  const recent = backupStatus(entries, backedUp, null, now);
+  assert.equal(recent.unsaved, 2);
+  assert.equal(recent.remind, false);
+  const weekLater = new Date(now.getTime() + 7 * 86400000);
+  assert.equal(backupStatus(entries, backedUp, null, weekLater).remind, true);
+  const snooze = new Date(weekLater.getTime() + 1000).toISOString();
+  assert.equal(backupStatus(entries, backedUp, snooze, weekLater).remind, false);
 });

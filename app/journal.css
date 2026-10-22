@@ -2394,3 +2394,74 @@ label.setting-row {
     padding: 14px 8px;
   }
 }
+
+/* ---------- Delete, undo, backup reminders ---------- */
+.journal-app .danger {
+  border-color: #f1d3cf;
+  color: #b42318;
+}
+.journal-app .danger:not(:disabled):hover {
+  background: #fdf3f2;
+}
+.entry-hero-actions {
+  display: flex;
+  gap: 8px;
+}
+.toast-action {
+  margin-left: 6px;
+  padding: 4px 11px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+.toast-action:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+.backup-nudge {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+  padding: 12px 14px 12px 16px;
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  background: #fff;
+}
+.backup-nudge-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--wash);
+}
+.backup-nudge p {
+  flex: 1;
+  color: var(--secondary-ink);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.backup-nudge strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+.journal-app .backup-nudge .primary {
+  min-height: 36px;
+  padding: 8px 14px;
+  border-radius: 10px;
+}
+@media (max-width: 560px) {
+  .backup-nudge {
+    flex-wrap: wrap;
+  }
+  .backup-nudge p {
+    flex-basis: calc(100% - 48px);
+  }
+  .journal-app .backup-nudge .primary {
+    margin-left: auto;
+  }
+}

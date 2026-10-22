@@ -19,6 +19,7 @@ import {
   ChevronRight,
   Home,
   Search,
+  Trash2,
 } from "lucide-react";
 import {
   blankJournal,
@@ -27,6 +28,12 @@ import {
   entrySchema,
   sampleJournal,
   download,
+  removeEntries,
+  backupStatus,
+  backupRecordSchema,
+  BACKUP_KEY,
+  BACKUP_SNOOZE_KEY,
+  type BackupRecord,
   contextGroups,
   entryDay,
   type Entry,
@@ -86,7 +93,10 @@ export default function Journal() {
     [reflectingId, setReflectingId] = useState<string | null>(null),
     [query, setQuery] = useState(""),
     [filter, setFilter] = useState("all"),
-    [pattern, setPattern] = useState<Reflection | null>(null);
+    [pattern, setPattern] = useState<Reflection | null>(null),
+    [undo, setUndo] = useState<{ label: string; previous: JournalData } | null>(null),
+    [lastBackup, setLastBackup] = useState<BackupRecord | null>(null),
+    [backupSnooze, setBackupSnooze] = useState<string | null>(null);
   const dialog = useRef<HTMLDialogElement>(null),
     form = useRef<HTMLFormElement>(null),
     file = useRef<HTMLInputElement>(null),
@@ -101,6 +111,11 @@ export default function Journal() {
   useEffect(() => {
     try {
       setAutoReflect(localStorage.getItem(AI_PERMISSION_KEY) === "allowed");
+      const backup = backupRecordSchema.safeParse(
+        JSON.parse(localStorage.getItem(BACKUP_KEY) || "null"),
+      );
+      if (backup.success) setLastBackup(backup.data);
+      setBackupSnooze(localStorage.getItem(BACKUP_SNOOZE_KEY));
       const raw = localStorage.getItem(JOURNAL_KEY);
       if (raw) setData(journalSchema.parse(JSON.parse(raw)));
     } catch {
@@ -134,6 +149,11 @@ export default function Journal() {
       }
     } else dialog.current?.close();
   }, [compose, draftKey, editing?.id]);
+  useEffect(() => {
+    if (!undo) return;
+    const t = setTimeout(() => setUndo(null), 8000);
+    return () => clearTimeout(t);
+  }, [undo]);
   useEffect(() => {
     if (!notice) return;
     const t = setTimeout(() => setNotice(""), 5000);
@@ -170,6 +190,7 @@ export default function Journal() {
       setData(valid);
       setError("");
       setPattern(null);
+      setUndo(null);
       if (recovery) setBlocked(false);
       return true;
     } catch {
@@ -177,6 +198,48 @@ export default function Journal() {
         "Could not save. Check browser storage or import a valid backup.",
       );
       return false;
+    }
+  }
+  function deleteEntries(ids: string[] | "all", label: string) {
+    const previous = latest.current;
+    if (!persist(removeEntries(previous, ids))) return false;
+    if (ids === "all") drafts.current.clear();
+    else for (const id of ids) drafts.current.delete(id);
+    setNotice("");
+    setUndo({ label, previous });
+    return true;
+  }
+  function undoChange() {
+    if (undo && persist(undo.previous)) setNotice("Restored");
+  }
+  function exportBackup() {
+    const current = latest.current;
+    download(
+      new Blob([JSON.stringify(current, null, 2)], {
+        type: "application/json",
+      }),
+      `studify-backup-${new Date().toLocaleDateString("en-CA")}.json`,
+    );
+    setNotice("Backup downloaded");
+    if (demo) return;
+    const record = {
+      at: new Date().toISOString(),
+      entries: current.entries.length,
+    };
+    setLastBackup(record);
+    try {
+      localStorage.setItem(BACKUP_KEY, JSON.stringify(record));
+    } catch {
+      /* the download still happened; only the reminder bookkeeping is lost */
+    }
+  }
+  function snoozeBackup() {
+    const until = new Date(Date.now() + 3 * 86400000).toISOString();
+    setBackupSnooze(until);
+    try {
+      localStorage.setItem(BACKUP_SNOOZE_KEY, until);
+    } catch {
+      /* snooze lasts for this session only */
     }
   }
   function updateEntry(entry: Entry) {
@@ -457,6 +520,7 @@ export default function Journal() {
   const quote = QUOTES[Math.floor(Date.now() / 86400000) % QUOTES.length];
   const months = [...new Set(visible.map((e) => entryDay(e).slice(0, 7)))];
   const totalMinutes = entries.reduce((sum, e) => sum + (e.duration || 0), 0);
+  const backup = backupStatus(entries, lastBackup, backupSnooze);
   const steps = entries.filter((e) => e.nextStep);
   const doneSteps = steps.filter((e) => e.done);
   if (!ready)
@@ -580,6 +644,25 @@ export default function Journal() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.22 }}
             >
+              {!demo && backup.remind && (
+                <div className="backup-nudge" role="status">
+                  <span className="backup-nudge-icon">
+                    <Download size={16} />
+                  </span>
+                  <p>
+                    <strong>
+                      {backup.unsaved} {backup.unsaved === 1 ? "entry isn’t" : "entries aren’t"} backed up.
+                    </strong>{" "}
+                    Studify saves only in this browser.
+                  </p>
+                  <button className="text-button" onClick={snoozeBackup}>
+                    Later
+                  </button>
+                  <button className="primary" onClick={exportBackup}>
+                    Back up now
+                  </button>
+                </div>
+              )}
               <section className="home-banner">
                 <div className="home-banner-quote">
                   <span className="pill">Thought for today</span>
@@ -865,14 +948,27 @@ export default function Journal() {
                     {prettyDay(entryDay(selectedEntry), true)}
                     {selectedEntry.course ? " · " + selectedEntry.course : ""}
                   </p>
-                  <button
-                    disabled={busy}
-                    className="secondary"
-                    onClick={() => openEntry(selectedEntry)}
-                  >
-                    <PenLine size={14} />
-                    Edit entry
-                  </button>
+                  <div className="entry-hero-actions">
+                    <button
+                      disabled={busy}
+                      className="secondary"
+                      onClick={() => openEntry(selectedEntry)}
+                    >
+                      <PenLine size={14} />
+                      Edit
+                    </button>
+                    <button
+                      disabled={busy}
+                      className="secondary danger"
+                      onClick={() => {
+                        if (deleteEntries([selectedEntry.id], "Entry deleted"))
+                          navigate(entryOrigin);
+                      }}
+                    >
+                      <Trash2 size={14} />
+                      Delete
+                    </button>
+                  </div>
                 </div>
                 <h1 id="saved-entry-title" ref={entryHeading} tabIndex={-1}>{selectedEntry.context}</h1>
                 <div className="entry-tags">
@@ -1279,22 +1375,15 @@ export default function Journal() {
                   <div>
                     <strong>Backup</strong>
                     <p>
-                      Entries stay in this browser. Clearing browser data
-                      removes them, so keep a backup.
+                      {lastBackup
+                        ? `Last backup ${new Date(lastBackup.at).toLocaleDateString("en-US", { month: "short", day: "numeric" })} · ${lastBackup.entries} ${lastBackup.entries === 1 ? "entry" : "entries"}${backup.unsaved ? ` · ${backup.unsaved} new since` : ""}.`
+                        : "Never backed up."}{" "}
+                      Entries live only in this browser, so clearing browser
+                      data removes them.
                     </p>
                   </div>
                   <div className="setting-actions">
-                    <button
-                      className="secondary"
-                      onClick={() =>
-                        download(
-                          new Blob([JSON.stringify(data, null, 2)], {
-                            type: "application/json",
-                          }),
-                          `studify-backup-${today}.json`,
-                        )
-                      }
-                    >
+                    <button className="secondary" onClick={exportBackup}>
                       <Download size={15} />
                       Export
                     </button>
@@ -1318,6 +1407,7 @@ export default function Journal() {
                     try {
                       if (f.size > 10000000) throw Error();
                       const v = journalSchema.parse(JSON.parse(await f.text()));
+                      const previous = latest.current;
                       if (
                         confirm(
                           `Replace the current journal with ${v.entries.length} entries from this backup?`,
@@ -1325,7 +1415,7 @@ export default function Journal() {
                         persist(v, true)
                       ) {
                         setSelected(null);
-                        setNotice("Journal imported");
+                        setUndo({ label: "Journal imported", previous });
                       }
                     } catch {
                       setError(
@@ -1335,6 +1425,30 @@ export default function Journal() {
                     e.target.value = "";
                   }}
                 />
+                <div className="setting-row">
+                  <div>
+                    <strong>Delete all entries</strong>
+                    <p>
+                      Removes every entry from this browser. Back up first if
+                      you might want them later.
+                    </p>
+                  </div>
+                  <button
+                    className="secondary danger"
+                    disabled={!entries.length || busy}
+                    onClick={() => {
+                      if (
+                        confirm(
+                          `Delete all ${entries.length} ${entries.length === 1 ? "entry" : "entries"}? You can undo for a few seconds.`,
+                        )
+                      )
+                        deleteEntries("all", "All entries deleted");
+                    }}
+                  >
+                    <Trash2 size={15} />
+                    Delete all
+                  </button>
+                </div>
               </section>
               <section className="panel settings-group">
                 <h2 className="panel-title">AI reflection</h2>
@@ -1620,7 +1734,14 @@ export default function Journal() {
           </div>
         </form>
       </dialog>
-      {notice && (
+      {undo ? (
+        <div className="toast" role="status">
+          <span>{undo.label}</span>
+          <button className="toast-action" onClick={undoChange}>
+            Undo
+          </button>
+        </div>
+      ) : notice && (
         <div className="toast" role="status">
           <Check size={16} />
           {notice}

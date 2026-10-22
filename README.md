@@ -59,6 +59,10 @@ References: [OpenAI structured outputs](https://developers.openai.com/api/docs/g
 
 Journal records use the validated version 2 schema and localStorage key `study-journal.v2`. Settings offers JSON backup/import; replacement requires confirmation. Cross-tab updates refresh the interface; concurrent writes remain last-write-wins.
 
+Entries can be deleted from the entry page, or all at once in Settings. Deleting, deleting all, and importing a backup each show an Undo toast for 8 seconds; any other saved change ends the undo window.
+
+Backups are manual downloads (`studify-backup-YYYY-MM-DD.json`). The app records the last backup (`studify-last-backup`) and shows it in Settings. Home shows a reminder when 3+ entries have never been backed up, or when entries created since the last backup are a week old or number 10+. "Later" snoozes it for 3 days (`studify-backup-snooze`). The sample journal never counts as a backup.
+
 Clearing browser data removes entries. Devices, browser profiles, and site origins have separate storage. Saving alone sends no journal content to the server. AI requests send only the selected entries with visible disclosure; provider data policies still apply. Redis holds short-lived counters and daily hashed IP identifiers, not journal content. Google Fonts supplies fonts; hosting providers may record ordinary access logs.
 
 ## Deploy
@@ -78,13 +82,13 @@ Import this directory into Vercel as a Next.js project with Node.js 24. The jour
 
 ## Verification
 
-7 automated tests cover required journal context, optional fields, remembered multi-select methods, valid backups, duplicate IDs, dates, evidence IDs, and bounded AI requests. Production compilation and type checking pass.
+9 automated tests cover required journal context, optional fields, remembered multi-select methods, valid backups, duplicate IDs, dates, evidence IDs, bounded AI requests, entry deletion, and backup reminders. Production compilation and type checking pass.
 
 Browser checks cover Save only, required fields, remembered custom choices, takeaways, completed next steps after reload, and navigation. The unconfigured AI endpoint returns 503 without a provider call.
 
 Live OpenAI/Upstash integration and response quality have not been verified because credentials were unavailable. Evaluate representative student reflections before enabling public AI access.
 
-Future work includes deletion with recovery, stronger concurrent-write handling, journal PDF/Word exports, provider integration tests, and measured reflection-quality evaluation. Practice generation is outside the current primary experience.
+Future work includes stronger concurrent-write handling, journal PDF/Word exports, provider integration tests, and measured reflection-quality evaluation. Practice generation is outside the current primary experience.
 
 ## Layout and navigation
 
@@ -94,7 +98,7 @@ A left sidebar holds **Log a session** (the primary action) above the pages: Hom
 - **Journal**: search, subject chips, and entries grouped by month. Opening an entry shows its notes, the AI reflection, and an always-visible takeaway and next-step form.
 - **Insights**: totals, optional AI themes across recent entries, and where/how you studied as expandable bars. Counts reflect what was recorded, not productivity.
 - **Next steps**: open and done lists with due dates; overdue steps are highlighted.
-- **Settings**: backup export/import, the automatic-reflection switch with connection status, and the sample journal.
+- **Settings**: backup export/import with last-backup status, delete all entries, the automatic-reflection switch with connection status, and the sample journal.
 
 Session logging uses four steps: session details, location and methods, reflection, and review. Next validates the current step; Back preserves answers. Closing and reopening the form restores its draft until the page reloads. Opening an entry keeps a return link to where you came from.
 
