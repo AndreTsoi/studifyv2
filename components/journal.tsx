@@ -17,6 +17,8 @@ import {
   Flag,
   PenLine,
   ChevronRight,
+  Home,
+  Search,
 } from "lucide-react";
 import {
   blankJournal,
@@ -24,6 +26,7 @@ import {
   journalSchema,
   entrySchema,
   sampleJournal,
+  download,
   contextGroups,
   entryDay,
   type Entry,
@@ -31,7 +34,6 @@ import {
   type Reflection,
 } from "@/lib/journal";
 import { validateEvidence } from "@/lib/ai-contract";
-import { KEY, dataSchema, download } from "@/lib/data";
 const AI_PERMISSION_KEY = "study-journal-ai-permission-v1";
 type View = "Home" | "Journal" | "Patterns" | "Next steps" | "Settings";
 const headings = {
@@ -41,6 +43,23 @@ const headings = {
   "Next steps": "Next steps",
   Settings: "Settings",
 };
+const QUOTES = [
+  { text: "Practice isn’t the thing you do once you’re good. It’s the thing you do that makes you good.", by: "Malcolm Gladwell" },
+  { text: "Do not let what you cannot do interfere with what you can do.", by: "John Wooden" },
+  { text: "The beautiful thing about learning is that no one can take it away from you.", by: "B.B. King" },
+  { text: "The more that you read, the more things you will know. The more that you learn, the more places you’ll go.", by: "Dr. Seuss" },
+  { text: "In learning you will teach, and in teaching you will learn.", by: "Phil Collins" },
+  { text: "Success is the sum of small efforts, repeated day in and day out.", by: "Robert Collier" },
+  { text: "The mind is not a vessel that needs filling, but wood that needs igniting.", by: "Plutarch" },
+];
+// "2026-10-20" -> "Oct 20" (noon avoids timezone rollover)
+function prettyDay(iso: string, weekday = false) {
+  return new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", {
+    ...(weekday ? { weekday: "long" as const } : {}),
+    month: "short",
+    day: "numeric",
+  });
+}
 export default function Journal() {
   const [data, setData] = useState<JournalData>(blankJournal),
     [ready, setReady] = useState(false),
@@ -84,20 +103,10 @@ export default function Journal() {
       setAutoReflect(localStorage.getItem(AI_PERMISSION_KEY) === "allowed");
       const raw = localStorage.getItem(JOURNAL_KEY);
       if (raw) setData(journalSchema.parse(JSON.parse(raw)));
-      else {
-        const old = localStorage.getItem(KEY);
-        if (old)
-          setData({
-            ...blankJournal,
-            courses: dataSchema
-              .parse(JSON.parse(old))
-              .courses.map((c) => c.name),
-          });
-      }
     } catch {
       setBlocked(true);
       setError(
-        "Saved records could not be read. Import a valid journal backup in Settings before saving new entries.",
+        "Saved records couldn’t be read. Import a backup in Settings before saving.",
       );
     }
     setReady(true);
@@ -276,7 +285,7 @@ export default function Journal() {
       setAutoReflect(allowed);
       return true;
     } catch {
-      setError("Could not remember AI permission. Check browser storage and try again.");
+      setError("Couldn’t save that AI setting. Check browser storage.");
       return false;
     }
   }
@@ -284,7 +293,7 @@ export default function Journal() {
     if (busy) return;
     if (!available) {
       setError(
-        "AI is not connected yet. Your entry is saved, and you can write your own takeaway.",
+        "AI isn’t connected. Your entry is saved — write your own takeaway.",
       );
       return;
     }
@@ -312,7 +321,7 @@ export default function Journal() {
         );
         if (current && JSON.stringify(current) === JSON.stringify(entries[0])) {
           updateEntry({ ...current, ai: checked });
-          setNotice("Reflection ready. Keep what fits; change what doesn’t.");
+          setNotice("Reflection ready — keep what fits.");
         } else
           setError("This entry changed while reflecting. Please try again.");
       }
@@ -412,6 +421,44 @@ export default function Journal() {
       ...entries.map((e) => e.course).filter(Boolean),
     ]),
   ];
+  const week = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - 6 + i);
+    const day = d.toLocaleDateString("en-CA");
+    const items = recent.filter((e) => entryDay(e) === day);
+    return {
+      day,
+      label: d.toLocaleDateString("en-US", { weekday: "short" }),
+      minutes: items.reduce((sum, e) => sum + (e.duration || 0), 0),
+      count: items.length,
+    };
+  });
+  const weekMinutes = week.reduce((sum, d) => sum + d.minutes, 0);
+  const byTime = weekMinutes > 0;
+  const peak = Math.max(1, ...week.map((d) => (byTime ? d.minutes : d.count)));
+  const [wholeHours, tenthHours] = (Math.round(weekMinutes / 6) / 10)
+    .toFixed(1)
+    .split(".");
+  const hour = new Date().getHours();
+  const greeting =
+    hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const lastDay = entries[0] ? entryDay(entries[0]) : "";
+  const daysSince = lastDay
+    ? Math.round((Date.parse(today) - Date.parse(lastDay)) / 86400000)
+    : -1;
+  const lastLabel =
+    daysSince < 0
+      ? "None yet"
+      : daysSince === 0
+        ? "Today"
+        : daysSince === 1
+          ? "Yesterday"
+          : `${daysSince} days ago`;
+  const quote = QUOTES[Math.floor(Date.now() / 86400000) % QUOTES.length];
+  const months = [...new Set(visible.map((e) => entryDay(e).slice(0, 7)))];
+  const totalMinutes = entries.reduce((sum, e) => sum + (e.duration || 0), 0);
+  const steps = entries.filter((e) => e.nextStep);
+  const doneSteps = steps.filter((e) => e.done);
   if (!ready)
     return (
       <div className="loading">
@@ -421,46 +468,64 @@ export default function Journal() {
     );
   return (
     <MotionConfig reducedMotion="user">
-      <div className="journal-app">
-        <header className="journal-nav">
+      <div className="journal-app app-shell">
+        <aside className="app-side">
           <a
-            href="/"
-            className="brand"
+            href="/journal"
+            className="app-brand"
             onClick={(event) => {
               event.preventDefault();
               navigate("Home");
             }}
           >
-            <BookOpen size={21} strokeWidth={1.5} />
-            <span>
-              Study journal
-              <span className="brand-caption">A record of your learning</span>
-            </span>
+            <span className="brand-mark">s.</span>
+            <span className="app-brand-name">Studify</span>
           </a>
-          <nav aria-label="Main navigation">
-            {(["Home", "Journal", "Patterns"] as View[]).map(
-              (v) => (
+          <button
+            className="app-log"
+            aria-label="Log a session"
+            disabled={busy}
+            onClick={() => openEntry()}
+          >
+            <Plus size={17} />
+            <span>Log a session</span>
+          </button>
+          <nav className="app-nav" aria-label="Main navigation">
+            {([["Home", Home], ["Journal", BookOpen], ["Patterns", Sparkles], ["Next steps", Flag]] as const).map(
+              ([v, Icon]) => (
                 <button
-                  key={headings[v]}
-                  className={view === v ? "selected" : ""}
+                  key={v}
+                  className={`app-nav-item${view === v ? " selected" : ""}`}
                   aria-current={view === v ? "page" : undefined}
+                  aria-label={headings[v]}
                   onClick={() => navigate(v)}
                 >
-                  {view === v && <motion.span className="nav-active-surface" layoutId="active-navigation" transition={{ type: "spring", stiffness: 460, damping: 36 }} />}
-                  <span className="nav-tab-label">{headings[v]}</span>
+                  {view === v && <motion.span className="app-nav-surface" layoutId="active-navigation" transition={{ type: "spring", stiffness: 460, damping: 36 }} />}
+                  <Icon size={17} />
+                  <span>{headings[v]}</span>
+                  {v === "Next steps" && pending.length > 0 && <em className="app-nav-count">{pending.length}</em>}
                 </button>
               ),
             )}
           </nav>
-          <button
-            className="icon-button"
-            title="Settings"
-            aria-label="Settings"
-            onClick={() => navigate("Settings")}
-          >
-            <Settings size={19} />
-          </button>
-        </header>
+          <div className="app-side-foot">
+            <button
+              className={`app-nav-item${view === "Settings" ? " selected" : ""}`}
+              aria-current={view === "Settings" ? "page" : undefined}
+              aria-label="Settings"
+              onClick={() => navigate("Settings")}
+            >
+              {/* Its own surface: fades in rather than sliding across the sidebar */}
+              {view === "Settings" && <motion.span className="app-nav-surface" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.18 }} />}
+              <Settings size={17} />
+              <span>Settings</span>
+            </button>
+            <p className="app-side-note">
+              <span />
+              {demo ? "Sample journal" : "Saved on this device"}
+            </p>
+          </div>
+        </aside>
         <main className="journal-main">
           {demo && (
             <div className="demo-banner">
@@ -481,20 +546,18 @@ export default function Journal() {
                   day: "numeric",
                 })}
               </p>
-              <h1>{headings[view]}</h1>
-              <p className="subtitle">
-                {view === "Home"
-                  ? "Log a study session here. Your recent entries and saved next steps appear below."
-                  : view === "Journal"
-                    ? "Find past sessions. Open an entry to read, edit, or reflect on it."
-                    : view === "Patterns"
-                      ? "Compare your entries by location and study method, or ask AI to look for recurring themes."
-                      : view === "Next steps"
-                        ? "Keep track of what you want to try next."
-                        : "Manage your data and AI connection."}
-              </p>
+              <h1>{view === "Home" ? greeting : headings[view]}</h1>
+              {view !== "Home" && <p className="subtitle">
+                {view === "Journal"
+                  ? "Open an entry to read, edit, or reflect on it."
+                  : view === "Patterns"
+                    ? "Your entries by location and method, plus optional AI themes."
+                    : view === "Next steps"
+                      ? "Saved from your entries. Check one off when it’s done."
+                      : "Your data and AI connection."}
+              </p>}
             </div>
-            {(view === "Home" || (view === "Journal" && !selectedEntry)) && <button
+            {view === "Journal" && !selectedEntry && <button
               className="primary"
               disabled={busy}
               onClick={() => openEntry()}
@@ -511,151 +574,260 @@ export default function Journal() {
             </div>
           )}
           {view === "Home" && (
-            <motion.section
-              className="home-dashboard"
+            <motion.div
+              className="home-dash"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2 }}
+              transition={{ duration: 0.22 }}
             >
-              {entries.length > 0 && <div className="home-stats" aria-label="Last seven days">
-                <article>
-                  <span>Entries · last 7 days</span>
-                  <strong>{recent.length}</strong>
-                  <small>
-                    {new Set(recent.map(entryDay)).size} days recorded
-                  </small>
-                </article>
-                <article>
-                  <span>Recorded study time</span>
-                  <strong>
-                    {timed.length
-                      ? `${Math.round((timed.reduce((sum, e) => sum + (e.duration || 0), 0) / 60) * 10) / 10}h`
-                      : "—"}
-                  </strong>
-                  <small>
-                    {timed.length} of {recent.length} entries include duration
-                  </small>
-                </article>
-                <article>
-                  <span>Open next steps</span>
-                  <strong>{pending.length}</strong>
-                  <small>
-                    {pending.filter((e) => e.due && e.due <= today).length}{" "}
-                    planned for today or earlier
-                  </small>
-                </article>
-              </div>
-              }
-              <section className="card home-recent">
-                <div className="card-heading">
-                  <h2>Recent sessions</h2>
+              <section className="home-banner">
+                <div className="home-banner-quote">
+                  <span className="pill">Thought for today</span>
+                  <blockquote>“{quote.text}”</blockquote>
+                  <cite>{quote.by}</cite>
                 </div>
-                {entries.slice(0, 3).map((e) => (
-                  <button
-                    className="home-session"
-                    key={e.id}
-                    onClick={() => showEntry(e.id)}
-                  >
-                    <span className="home-session-icon">
-                      <BookOpen size={18} />
-                    </span>
-                    <div>
-                      <h3>{e.context}</h3>
-                      <small>
-                        {entryDay(e)} · {e.location} · {e.methods.join(", ")}
-                      </small>
-                      <p>{e.reflection}</p>
-                    </div>
-                    <ChevronRight size={17} />
-                  </button>
-                ))}
-                {!entries.length && (
-                  <div className="home-empty">
-                    <p>Your latest entries will appear here.</p>
-                    <p>Use Log a session above. Add a topic, where and how you studied, and a short reflection. That’s enough to get started.</p>
+                <dl className="home-banner-stats">
+                  <div>
+                    <dt>Last session</dt>
+                    <dd>{lastLabel}</dd>
                   </div>
-                )}
+                  <div>
+                    <dt>Entries</dt>
+                    <dd>{entries.length}</dd>
+                  </div>
+                  <div>
+                    <dt>Open next steps</dt>
+                    <dd>{pending.length}</dd>
+                  </div>
+                </dl>
               </section>
-            </motion.section>
+
+              <h2 className="home-section-title">This week</h2>
+              <div className="week-grid">
+                <section className="week-card" aria-label="Study time this week">
+                  <div className="week-face">
+                    <span className="brand-mark">s.</span>
+                    <span className="week-chip">
+                      {recent.length} {recent.length === 1 ? "session" : "sessions"}
+                    </span>
+                    <small>Study time</small>
+                    <strong className="week-big">
+                      {wholeHours}
+                      <span>.{tenthHours}h</span>
+                    </strong>
+                    <p>
+                      {new Set(recent.map(entryDay)).size} of 7 days
+                      {timed.length < recent.length && ` · ${recent.length - timed.length} without a duration`}
+                    </p>
+                  </div>
+                  <button className="secondary" onClick={() => navigate("Journal")}>
+                    <Clock3 size={15} />
+                    Session history
+                  </button>
+                  <button className="primary" disabled={busy} onClick={() => openEntry()}>
+                    <Plus size={15} />
+                    Log a session
+                  </button>
+                </section>
+
+                <section className="week-chart" aria-label="Last seven days">
+                  <span className="pill">Last 7 days</span>
+                  <strong className="week-chart-total">
+                    {byTime
+                      ? `${weekMinutes} min`
+                      : `${recent.length} ${recent.length === 1 ? "session" : "sessions"}`}
+                  </strong>
+                  <div className="week-bars">
+                    {week.map((d) => {
+                      const value = byTime ? d.minutes : d.count;
+                      return (
+                        <div className={`week-bar${d.day === today ? " today" : ""}`} key={d.day}>
+                          <div className="week-bar-track">
+                            {value > 0 && <span className="week-bar-value">{byTime ? `${value}m` : value}</span>}
+                            <span
+                              className={`week-bar-fill${value ? "" : " is-empty"}`}
+                              style={{ height: value ? Math.max(Math.round((value / peak) * 120), 8) : 4 }}
+                            />
+                          </div>
+                          <span className="week-bar-day">{d.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <small className="week-chart-foot">
+                    {!recent.length ? "Log a session to start this week’s chart." : byTime ? "Minutes studied per day" : "Sessions logged per day"}
+                  </small>
+                </section>
+              </div>
+
+              <div className="home-lower">
+                <section className="card home-panel">
+                  <div className="card-heading">
+                    <h2>Recent sessions</h2>
+                    {entries.length > 3 && (
+                      <button className="text-button" onClick={() => navigate("Journal")}>
+                        View all <ArrowRight size={13} />
+                      </button>
+                    )}
+                  </div>
+                  {entries.slice(0, 3).map((e) => (
+                    <button
+                      className="home-session"
+                      key={e.id}
+                      onClick={() => showEntry(e.id)}
+                    >
+                      <div>
+                        <h3>{e.context}</h3>
+                        <small>
+                          {prettyDay(entryDay(e))} · {e.location} · {e.methods.join(", ")}
+                        </small>
+                        <p>{e.reflection}</p>
+                      </div>
+                      <ChevronRight size={17} />
+                    </button>
+                  ))}
+                  {!entries.length && (
+                    <div className="home-empty">
+                      <p>Your entries will appear here.</p>
+                      <small>Log a session: a topic, where and how you studied, and a short reflection.</small>
+                      <button className="text-button" onClick={toggleDemo}>
+                        Explore a sample journal <ArrowRight size={13} />
+                      </button>
+                    </div>
+                  )}
+                </section>
+
+                <section className="card home-panel">
+                  <div className="card-heading">
+                    <h2>Up next</h2>
+                    {pending.length > 0 && (
+                      <button className="text-button" onClick={() => navigate("Next steps")}>
+                        View all <ArrowRight size={13} />
+                      </button>
+                    )}
+                  </div>
+                  {pending.slice(0, 4).map((e) => (
+                    <label className="up-next" key={e.id}>
+                      <input
+                        type="checkbox"
+                        checked={e.done}
+                        onChange={() => updateEntry({ ...e, done: !e.done })}
+                      />
+                      <span>
+                        <strong>{e.nextStep}</strong>
+                        <small>{e.due ? `Planned for ${prettyDay(e.due)}` : "Unscheduled"} · {e.context}</small>
+                      </span>
+                    </label>
+                  ))}
+                  {!pending.length && (
+                    <p className="up-next-empty">
+                      Nothing open. Add a next step from any entry.
+                    </p>
+                  )}
+                </section>
+              </div>
+            </motion.div>
           )}
           {view === "Journal" && !selectedEntry && (
             <>
-              <div className="journal-list-heading">
-                <h2>
-                  Your entries <span className="count">{entries.length}</span>
-                </h2>
-                <span className="private-label">
-                  {demo ? "Demo entries" : "Private on this device"}
+              <div className="panel journal-toolbar">
+                <label className="search-field">
+                  <Search size={16} />
+                  <input
+                    aria-label="Search journal"
+                    placeholder="Search topics or reflections"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                </label>
+                <span className="toolbar-count">
+                  {visible.length} of {entries.length}{" "}
+                  {entries.length === 1 ? "entry" : "entries"}
                 </span>
+                {courses.length > 0 && (
+                  <div className="filter-chips" role="group" aria-label="Filter by subject">
+                    {["all", ...courses].map((c) => (
+                      <button
+                        key={c}
+                        className={`chip${filter === c ? " on" : ""}`}
+                        aria-pressed={filter === c}
+                        onClick={() => setFilter(c)}
+                      >
+                        {c === "all" ? "All subjects" : c}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-              <div className="journal-search">
-                <input
-                  aria-label="Search journal"
-                  placeholder="Search topics, reflections, or locations"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                />
-                <select
-                  aria-label="Filter by course"
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
-                >
-                  <option value="all">All subjects</option>
-                  {courses.map((c) => (
-                    <option key={c}>{c}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="entry-list">
-                {visible.map((e, i) => (
-                  <motion.button
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: Math.min(i * 0.025, 0.15) }}
-                    className="entry-card"
-                    key={e.id}
-                    onClick={() => showEntry(e.id)}
-                  >
-                    <div className="entry-date">
-                      <BookOpen size={17} />
-                      <span>{entryDay(e)}</span>
-                    </div>
-                    <div className="entry-card-body">
-                      <div className="entry-title">
-                        <h3>{e.context}</h3>
-                        <ChevronRight size={17} />
-                      </div>
-                      <div className="entry-tags">
-                        {e.course && <span>{e.course}</span>}
-                        <span>
-                          <MapPin size={12} />
-                          {e.location}
-                        </span>
-                        {e.methods.map((m) => (
-                          <span key={m}>{m}</span>
-                        ))}
-                        {e.duration && <span>{e.duration} min</span>}
-                      </div>
-                      <p>{e.reflection}</p>
-                      {e.takeaway && (
-                        <div className="takeaway-preview">
-                          Your takeaway · {e.takeaway}
-                        </div>
-                      )}
-                    </div>
-                  </motion.button>
-                ))}
-              </div>
+              {months.map((m) => (
+                <section className="entry-month" key={m}>
+                  <h2 className="entry-month-label">
+                    {new Date(`${m}-15T12:00:00`).toLocaleDateString("en-US", {
+                      month: "long",
+                      year: "numeric",
+                    })}
+                  </h2>
+                  <div className="panel entry-list">
+                    {visible
+                      .filter((e) => entryDay(e).startsWith(m))
+                      .map((e, i) => (
+                        <motion.button
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: Math.min(i * 0.025, 0.15) }}
+                          className="entry-card"
+                          key={e.id}
+                          onClick={() => showEntry(e.id)}
+                        >
+                          <span className="entry-date">
+                            <strong>{Number(entryDay(e).slice(8))}</strong>
+                            <span>
+                              {new Date(`${entryDay(e)}T12:00:00`).toLocaleDateString("en-US", { weekday: "short" })}
+                            </span>
+                          </span>
+                          <span className="entry-card-body">
+                            <h3>{e.context}</h3>
+                            <p>{e.reflection}</p>
+                            <span className="entry-tags">
+                              {e.course && <span className="strong">{e.course}</span>}
+                              <span>
+                                <MapPin size={12} />
+                                {e.location}
+                              </span>
+                              {e.methods.map((m) => (
+                                <span key={m}>{m}</span>
+                              ))}
+                              {e.duration && (
+                                <span>
+                                  <Clock3 size={12} />
+                                  {e.duration} min
+                                </span>
+                              )}
+                            </span>
+                            {e.takeaway && (
+                              <span className="takeaway-preview">
+                                <strong>Takeaway</strong> {e.takeaway}
+                              </span>
+                            )}
+                          </span>
+                          <ChevronRight className="entry-chev" size={18} />
+                        </motion.button>
+                      ))}
+                  </div>
+                </section>
+              ))}
               {!visible.length && (
-                <div className="journal-empty">
-                  <BookOpen size={30} />
+                <div className="panel journal-empty">
+                  <span className="empty-art tint-2">
+                    <BookOpen size={26} strokeWidth={1.6} />
+                  </span>
                   <h2>
                     {entries.length ? "No matching entries" : "No entries yet"}
                   </h2>
                   <p>
                     {entries.length
                       ? "Try a different search or subject."
-                      : "Use Log a session above to log a study session."}
+                      : "Use Log a session to add your first entry."}
                   </p>
                   {entries.length > 0 && (
                     <button
@@ -667,7 +839,7 @@ export default function Journal() {
                   )}
                   {!entries.length && (
                     <button className="text-button" onClick={toggleDemo}>
-                      Explore a sample journal
+                      Explore a sample journal <ArrowRight size={13} />
                     </button>
                   )}
                 </div>
@@ -676,7 +848,6 @@ export default function Journal() {
           )}
           {view === "Journal" && selectedEntry && (
             <motion.article className="entry-reader" key={selectedEntry.id} initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }} aria-labelledby="saved-entry-title">
-              <div className="entry-reader-nav">
               <button
                 className="text-button back-link"
                 onClick={() => navigate(entryOrigin)}
@@ -688,17 +859,12 @@ export default function Journal() {
                     ? "All entries"
                     : `Back to ${headings[entryOrigin]}`}
               </button>
-              <span className="entry-reader-label">Journal / Entry</span>
-              </div>
-              <section className="card entry-detail">
-                <div className="card-heading">
-                  <div>
-                    <p className="eyebrow">
-                      {entryDay(selectedEntry)}
-                      {selectedEntry.course ? " · " + selectedEntry.course : ""}
-                    </p>
-                    <h1 id="saved-entry-title" ref={entryHeading} tabIndex={-1}>{selectedEntry.context}</h1>
-                  </div>
+              <section className="panel entry-hero">
+                <div className="entry-hero-top">
+                  <p className="eyebrow">
+                    {prettyDay(entryDay(selectedEntry), true)}
+                    {selectedEntry.course ? " · " + selectedEntry.course : ""}
+                  </p>
                   <button
                     disabled={busy}
                     className="secondary"
@@ -708,6 +874,7 @@ export default function Journal() {
                     Edit entry
                   </button>
                 </div>
+                <h1 id="saved-entry-title" ref={entryHeading} tabIndex={-1}>{selectedEntry.context}</h1>
                 <div className="entry-tags">
                   <span>
                     <MapPin size={13} />
@@ -723,220 +890,229 @@ export default function Journal() {
                     </span>
                   )}
                 </div>
-                <p className="eyebrow entry-body-label">Your session notes</p>
-                <p className="reflection-text">{selectedEntry.reflection}</p>
               </section>
-              <div className="reflection-grid">
-                <section className="reflection-panel" aria-busy={reflectingId === selectedEntry.id} key={selectedEntry.id + "-ai"}>
-                  <div className="insight-label">
-                    <Sparkles size={16} /> AI REFLECTION
-                  </div>
-                  {selectedEntry.ai ? (
-                    <>
-                      <h2>A possible interpretation</h2>
-                      <p className="reflection-text">
-                        {selectedEntry.ai.summary}
-                      </p>
-                      <small>
-                        Based on this entry · AI suggestion, not a measurement
-                        of learning.
-                      </small>
-                      {selectedEntry.ai.question && (
-                        <div className="follow-up">
-                          {selectedEntry.ai.question}
-                        </div>
-                      )}
+              <div className="entry-layout">
+                <div className="entry-main">
+                  <section className="panel">
+                    <h2 className="panel-title">Session notes</h2>
+                    <p className="reflection-text">{selectedEntry.reflection}</p>
+                  </section>
+                  <section className="panel reflection-panel" aria-busy={reflectingId === selectedEntry.id} key={selectedEntry.id + "-ai"}>
+                    <div className="insight-label">
+                      <Sparkles size={15} /> AI reflection
+                    </div>
+                    {selectedEntry.ai ? (
+                      <>
+                        <h2>A possible interpretation</h2>
+                        <p className="reflection-text">
+                          {selectedEntry.ai.summary}
+                        </p>
+                        <small>AI suggestion · not a measure of learning.</small>
+                        {selectedEntry.ai.question && (
+                          <div className="follow-up">
+                            {selectedEntry.ai.question}
+                          </div>
+                        )}
+                        <label>
+                          Your response or correction{" "}
+                          <textarea
+                            key={selectedEntry.id + selectedEntry.reply}
+                            maxLength={1500}
+                            defaultValue={selectedEntry.reply}
+                            placeholder="Does this fit? Add or correct it."
+                            onBlur={(e) => {
+                              if (e.target.value !== selectedEntry.reply)
+                                updateEntry({
+                                  ...selectedEntry,
+                                  reply: e.target.value,
+                                });
+                            }}
+                          />
+                        </label>
+                        <button
+                          disabled={busy}
+                          className="secondary"
+                          onClick={() =>
+                            void ask(
+                              [
+                                latest.current.entries.find(
+                                  (e) => e.id === selectedEntry.id,
+                                )!,
+                              ],
+                              "entry",
+                            )
+                          }
+                        >
+                          {busy ? "Reflecting…" : "Send response to AI"}
+                        </button>
+                        <p className="ai-disclosure">
+                          Sends this entry and your response to OpenAI.
+                        </p>
+                        {selectedEntry.ai.nextStep && (
+                          <div className="suggestion">
+                            <strong>One thing you could try</strong>
+                            <p>{selectedEntry.ai.nextStep}</p>
+                            <button
+                              disabled={busy}
+                              className="text-button"
+                              onClick={() => {
+                                if (
+                                  selectedEntry.nextStep &&
+                                  !confirm(
+                                    "Replace the current next step with this suggestion?",
+                                  )
+                                )
+                                  return;
+                                updateEntry({
+                                  ...selectedEntry,
+                                  nextStep: selectedEntry.ai!.nextStep,
+                                  done: false,
+                                });
+                                setNotice("Next step saved on Home");
+                              }}
+                            >
+                              Use this next step <ArrowRight size={14} />
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <h2>
+                          {reflectingId === selectedEntry.id ? "Reflecting on your session…" : "Your entry is saved"}
+                        </h2>
+                        <p>
+                          {reflectingId === selectedEntry.id ? "Looking at what helped and what to try next." : available ? "No reflection yet — generate one below." : "AI isn’t connected, so there’s no reflection. Your notes are saved."}
+                        </p>
+                        {available && !autoReflect && reflectingId !== selectedEntry.id && <label className="consent">
+                          <input
+                            type="checkbox"
+                            checked={consent}
+                            onChange={(e) => setConsent(e.target.checked)}
+                          />
+                          Send this entry to OpenAI for reflection.
+                        </label>}
+                        {available && <button
+                          disabled={!available || busy || !(autoReflect || consent)}
+                          className="primary"
+                          onClick={() => void ask([selectedEntry], "entry")}
+                        >
+                          <Sparkles size={16} />
+                          {reflectingId === selectedEntry.id ? "Reflecting…" : "Generate reflection"}
+                        </button>}
+                      </>
+                    )}
+                  </section>
+                </div>
+                <aside className="entry-aside">
+                  <section className="panel personal-takeaway" key={selectedEntry.id + "-takeaway"}>
+                    <h2 className="panel-title">Your takeaway</h2>
+                    <p className="panel-sub">
+                      Your own conclusion, plus an optional next step for Home.
+                    </p>
+                    <form
+                      key={
+                        selectedEntry.id + "-" + (selectedEntry.nextStep || "")
+                      }
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        const f = new FormData(e.currentTarget);
+                        if (
+                          updateEntry({
+                            ...selectedEntry,
+                            takeaway: String(f.get("takeaway") || ""),
+                            nextStep: String(f.get("nextStep") || ""),
+                            due: String(f.get("due") || ""),
+                          })
+                        )
+                          setNotice("Your takeaway is saved");
+                      }}
+                    >
                       <label>
-                        Your response or correction{" "}
+                        Takeaway
                         <textarea
-                          key={selectedEntry.id + selectedEntry.reply}
-                          maxLength={1500}
-                          defaultValue={selectedEntry.reply}
-                          placeholder="Does this fit? Add context or correct it."
-                          onBlur={(e) => {
-                            if (e.target.value !== selectedEntry.reply)
-                              updateEntry({
-                                ...selectedEntry,
-                                reply: e.target.value,
-                              });
-                          }}
+                          name="takeaway"
+                          maxLength={1400}
+                          defaultValue={selectedEntry.takeaway}
+                          placeholder="What did you get out of this session?"
                         />
                       </label>
-                      <button
-                        disabled={busy}
-                        className="secondary"
-                        onClick={() =>
-                          void ask(
-                            [
-                              latest.current.entries.find(
-                                (e) => e.id === selectedEntry.id,
-                              )!,
-                            ],
-                            "entry",
-                          )
-                        }
-                      >
-                        {busy ? "Reflecting…" : "Send response to AI"}
-                      </button>
-                      <p className="ai-disclosure">
-                        Sends this entry and your response to OpenAI.
-                      </p>
-                      {selectedEntry.ai.nextStep && (
-                        <div className="suggestion">
-                          <strong>One thing you could try</strong>
-                          <p>{selectedEntry.ai.nextStep}</p>
-                          <button
-                            disabled={busy}
-                            className="text-button"
-                            onClick={() => {
-                              if (
-                                selectedEntry.nextStep &&
-                                !confirm(
-                                  "Replace the current next step with this suggestion?",
-                                )
-                              )
-                                return;
-                              updateEntry({
-                                ...selectedEntry,
-                                nextStep: selectedEntry.ai!.nextStep,
-                                done: false,
-                              });
-                              setNotice("Next step saved on Home");
-                            }}
-                          >
-                            Use this next step <ArrowRight size={14} />
-                          </button>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <h2>
-                        {reflectingId === selectedEntry.id ? "Reflecting on your session…" : "Your entry is saved"}
-                      </h2>
-                      <p>
-                        {reflectingId === selectedEntry.id ? "Looking at what helped, what got in the way, and what you could try next." : available ? "No AI reflection has been generated for this entry yet. You can generate it below." : "AI reflection couldn’t be generated because AI isn’t connected yet. Your notes are safely saved."}
-                      </p>
-                      {available && !autoReflect && reflectingId !== selectedEntry.id && <label className="consent">
-                        <input
-                          type="checkbox"
-                          checked={consent}
-                          onChange={(e) => setConsent(e.target.checked)}
+                      <label>
+                        Next step <span className="optional">optional</span>
+                        <textarea
+                          name="nextStep"
+                          maxLength={400}
+                          defaultValue={selectedEntry.nextStep}
+                          placeholder="Something small to try next time"
                         />
-                        Allow this entry to be sent to OpenAI for reflection.
-                      </label>}
-                      {available && <button
-                        disabled={!available || busy || !(autoReflect || consent)}
-                        className="primary"
-                        onClick={() => void ask([selectedEntry], "entry")}
-                      >
-                        <Sparkles size={16} />
-                        {reflectingId === selectedEntry.id ? "Reflecting…" : "Generate reflection"}
-                      </button>}
-                    </>
-                  )}
-                </section>
-                <details className="card personal-takeaway optional-section" key={selectedEntry.id + "-takeaway"}>
-                  <summary>{selectedEntry.takeaway || selectedEntry.nextStep ? "Your takeaway & next step" : "Add a takeaway or next step"}<span>Optional</span></summary>
-                  <h2>Your conclusion</h2>
-                  <p className="subtitle">
-                    Write your own takeaway from this session. Add an optional
-                    action to show on Home.
-                  </p>
-                  <form
-                    key={
-                      selectedEntry.id + "-" + (selectedEntry.nextStep || "")
-                    }
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      const f = new FormData(e.currentTarget);
-                      if (
-                        updateEntry({
-                          ...selectedEntry,
-                          takeaway: String(f.get("takeaway") || ""),
-                          nextStep: String(f.get("nextStep") || ""),
-                          due: String(f.get("due") || ""),
-                        })
-                      )
-                        setNotice("Your takeaway is saved");
-                    }}
-                  >
-                    <label>
-                      Your takeaway
-                      <textarea
-                        name="takeaway"
-                        maxLength={1400}
-                        defaultValue={selectedEntry.takeaway}
-                        placeholder="What did you get out of this session?"
-                      />
-                    </label>
-                    <label>
-                      One next step <span className="optional">optional</span>
-                      <textarea
-                        name="nextStep"
-                        maxLength={400}
-                        defaultValue={selectedEntry.nextStep}
-                        placeholder="Something small to try next time"
-                      />
-                    </label>
-                    <label>
-                      When? <span className="optional">optional</span>
-                      <input
-                        type="date"
-                        name="due"
-                        defaultValue={selectedEntry.due}
-                      />
-                    </label>
-                    <button className="secondary" disabled={busy}>
-                      <Check size={15} />
-                      Save my takeaway
-                    </button>
-                  </form>
-                </details>
+                      </label>
+                      <label>
+                        When? <span className="optional">optional</span>
+                        <input
+                          type="date"
+                          name="due"
+                          defaultValue={selectedEntry.due}
+                        />
+                      </label>
+                      <button className="primary" disabled={busy}>
+                        <Check size={15} />
+                        Save takeaway
+                      </button>
+                    </form>
+                  </section>
+                </aside>
               </div>
             </motion.article>
           )}
           {view === "Patterns" && (
-            <>
-              {entries.some((e) => e.takeaway) && <details className="card optional-section">
-                <summary>Your saved takeaways</summary>
-                {entries.filter((e) => e.takeaway).map((e) => <article key={e.id} className="home-suggestion"><small>{entryDay(e)} · {e.context}</small><p>{e.takeaway}</p><button className="text-button" onClick={() => showEntry(e.id)}>Open entry <ArrowRight size={14}/></button></article>)}
-              </details>}
-              <details className="card pattern-intro optional-section">
-                <summary>Ask AI to find recurring themes<span>Optional</span></summary>
-                <h2>AI feedback across entries</h2>
-                <p>
-                  Ask AI to look for recurring themes in your recent
-                  reflections. Below, expand a location or method to see its
-                  entries. Entry counts do not measure how productive those
-                  sessions were.
-                </p>
-                <p className="ai-disclosure">
-                  AI reflection considers your latest{" "}
-                  {Math.min(entries.length, 12)} entries, including their text
-                  and context. They are sent to OpenAI only when you choose the
-                  button below.
-                </p>
+            <div className="insights">
+              <div className="stat-strip">
+                {(
+                  [
+                    ["Entries", entries.length],
+                    ["Places", new Set(entries.map((e) => e.location)).size],
+                    ["Methods", new Set(entries.flatMap((e) => e.methods)).size],
+                    ["Time logged", totalMinutes ? `${Math.round(totalMinutes / 6) / 10}h` : "—"],
+                  ] as const
+                ).map(([label, value]) => (
+                  <div className="panel stat-tile" key={label}>
+                    <small>{label}</small>
+                    <strong>{value}</strong>
+                  </div>
+                ))}
+              </div>
+
+              <section className="panel ai-panel">
+                <span className="ai-panel-art tint-3">
+                  <Sparkles size={24} strokeWidth={1.6} />
+                </span>
+                <div className="ai-panel-body">
+                  <h2>Find recurring themes</h2>
+                  <p>
+                    AI reads your latest {Math.min(entries.length, 12)} entries
+                    and suggests one pattern. They’re sent to OpenAI only when
+                    you press the button.
+                  </p>
+                  <small>
+                    {!available
+                      ? "Needs an AI connection. The overview below works without one."
+                      : entries.length < 3
+                        ? "Add at least 3 entries first."
+                        : "You can question or dismiss any interpretation."}
+                  </small>
+                </div>
                 <button
                   className="primary"
                   disabled={busy || !available || entries.length < 3}
                   onClick={() => void ask(entries.slice(0, 12), "patterns")}
                 >
                   <Sparkles size={16} />
-                  {busy
-                    ? "Looking across entries…"
-                    : "Reflect across my entries"}
+                  {busy ? "Looking across entries…" : "Find themes"}
                 </button>
-                <small>
-                  {!available
-                    ? "AI connection required. Your context overview works without it."
-                    : entries.length < 3
-                      ? "Add at least 3 entries first."
-                      : "You can question or dismiss any interpretation."}
-                </small>
-              </details>
+              </section>
+
               {pattern && (
-                <section className="reflection-panel pattern-result">
+                <section className="panel reflection-panel pattern-result">
                   <div className="card-heading">
                     <h2>A pattern to consider</h2>
                     <button
@@ -966,104 +1142,125 @@ export default function Journal() {
                     ))}
                   </div>
                   <p>Possible next step: {pattern.nextStep}</p>
-                  <small>
-                    Save any next step from its supporting journal entry after
-                    deciding it fits.
-                  </small>
+                  <small>Save a next step from its entry if it fits.</small>
                 </section>
               )}
+
               <div className="context-grid">
-                {(["location", "methods"] as const).map((field) => (
-                  <section className="card" key={field}>
-                    <h2>
-                      {field === "location"
-                        ? "Where you studied"
-                        : "How you studied"}
-                    </h2>
-                    <p className="subtitle">
-                      Recorded context · no productivity ranking
-                    </p>
-                    {contextGroups(entries, field).map(([label, items]) => (
-                      <details className="context-group" key={label}>
-                        <summary>
-                          {label}
-                          <span>
-                            {items.length}{" "}
-                            {items.length === 1 ? "entry" : "entries"}
-                          </span>
-                        </summary>
-                        {items.map((e) => (
-                          <button
-                            className="text-button evidence-entry"
-                            key={e.id}
-                            onClick={() => {
-                              showEntry(e.id);
-                            }}
-                          >
-                            {e.context}
-                            <ArrowRight size={12} />
-                          </button>
-                        ))}
-                      </details>
-                    ))}
-                    {!entries.length && (
-                      <p className="empty">
-                        Context will appear as you add entries.
+                {(["location", "methods"] as const).map((field) => {
+                  const groups = contextGroups(entries, field);
+                  const most = Math.max(1, ...groups.map(([, items]) => items.length));
+                  return (
+                    <section className="panel context-panel" key={field}>
+                      <div className="panel-head">
+                        <h2 className="panel-title">
+                          {field === "location" ? "Where you studied" : "How you studied"}
+                        </h2>
+                        <span className="pill">{groups.length}</span>
+                      </div>
+                      {groups.map(([label, items]) => (
+                        <details className="context-row" key={label}>
+                          <summary>
+                            <span className="context-name">{label}</span>
+                            <span className="context-bar">
+                              <span style={{ width: `${(items.length / most) * 100}%` }} />
+                            </span>
+                            <span className="context-count">{items.length}</span>
+                          </summary>
+                          <div className="context-entries">
+                            {items.map((e) => (
+                              <button
+                                className="text-button evidence-entry"
+                                key={e.id}
+                                onClick={() => {
+                                  showEntry(e.id);
+                                }}
+                              >
+                                {e.context}
+                                <ArrowRight size={12} />
+                              </button>
+                            ))}
+                          </div>
+                        </details>
+                      ))}
+                      {!entries.length && (
+                        <p className="panel-sub">
+                          Context will appear as you add entries.
+                        </p>
+                      )}
+                      <p className="panel-note">
+                        Counts show what you recorded, not how productive it was.
                       </p>
-                    )}
-                  </section>
-                ))}
+                    </section>
+                  );
+                })}
               </div>
-            </>
-          )}
-          {view === "Home" && entries.some((e) => e.nextStep) && (
-            <section className="card next-step-list">
-              <h2>Your next steps</h2>
-              <p className="subtitle">
-                Actions you saved in your entries. Check one off when it’s done.
-              </p>
-              {entries
-                .filter((e) => e.nextStep)
-                .sort(
-                  (a, b) =>
-                    Number(a.done) - Number(b.done) ||
-                    (a.due || "9999").localeCompare(b.due || "9999"),
-                )
-                .map((e) => (
-                  <div
-                    className={`next-step ${e.done ? "completed" : ""}`}
-                    key={e.id}
-                  >
-                    <input
-                      aria-label={`Complete: ${e.nextStep}`}
-                      type="checkbox"
-                      checked={e.done}
-                      onChange={() => updateEntry({ ...e, done: !e.done })}
-                    />
-                    <div>
-                      <strong>{e.nextStep}</strong>
-                      <small>
-                        {e.due ? `Planned for ${e.due}` : "Unscheduled"} ·{" "}
-                        {e.context}
-                      </small>
-                      <button
-                        className="text-button"
-                        onClick={() => {
-                          showEntry(e.id);
-                        }}
-                      >
-                        Open reflection <ArrowRight size={12} />
+
+              {entries.some((e) => e.takeaway) && (
+                <section className="panel">
+                  <h2 className="panel-title">Your takeaways</h2>
+                  {entries
+                    .filter((e) => e.takeaway)
+                    .map((e) => (
+                      <button className="takeaway-row" key={e.id} onClick={() => showEntry(e.id)}>
+                        <span className="pill">{prettyDay(entryDay(e))}</span>
+                        <span>
+                          <strong>{e.takeaway}</strong>
+                          <small>{e.context}</small>
+                        </span>
+                        <ChevronRight size={16} />
                       </button>
+                    ))}
+                </section>
+              )}
+            </div>
+          )}
+          {view === "Next steps" && (
+            <div className="steps">
+              {([["Open", pending], ["Done", doneSteps]] as const).map(([label, list]) =>
+                list.length > 0 && (
+                  <section className="panel" key={label}>
+                    <div className="panel-head">
+                      <h2 className="panel-title">{label}</h2>
+                      <span className="pill">{list.length}</span>
                     </div>
-                  </div>
-                ))}
-              {!entries.some((e) => e.nextStep) && (
-                <div className="journal-empty">
-                  <Flag size={28} />
-                  <h2>Leave yourself a useful next step.</h2>
-                  <p>
-                    Open an entry and write one small thing to try next time.
-                  </p>
+                    {list.map((e) => (
+                      <div className={`step-row${e.done ? " done" : ""}`} key={e.id}>
+                        <input
+                          aria-label={`Complete: ${e.nextStep}`}
+                          type="checkbox"
+                          checked={e.done}
+                          onChange={() => updateEntry({ ...e, done: !e.done })}
+                        />
+                        <div className="step-body">
+                          <strong>{e.nextStep}</strong>
+                          <span className="step-meta">
+                            <span className={`pill${!e.done && e.due && e.due < today ? " late" : ""}`}>
+                              {e.due ? `${!e.done && e.due < today ? "Overdue · " : ""}${prettyDay(e.due)}` : "Anytime"}
+                            </span>
+                            <span>{e.context}</span>
+                          </span>
+                        </div>
+                        <button
+                          className="text-button"
+                          onClick={() => {
+                            showEntry(e.id);
+                          }}
+                        >
+                          Open entry <ArrowRight size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </section>
+                ),
+              )}
+              {!steps.length && (
+                <div className="panel journal-empty">
+                  <span className="empty-art tint-4">
+                    <Flag size={26} strokeWidth={1.6} />
+                  </span>
+                  <h2>No next steps yet</h2>
+                  <p>Open an entry and add one small thing to try.</p>
                   <button
                     className="secondary"
                     onClick={() => navigate("Journal")}
@@ -1072,39 +1269,43 @@ export default function Journal() {
                   </button>
                 </div>
               )}
-            </section>
+            </div>
           )}
           {view === "Settings" && (
-            <div className="context-grid">
-              <section className="card settings-journal">
-                <h2>Your data stays with you</h2>
-                <p>
-                  Entries are stored in this browser on this device. Clearing
-                  browser data removes them. Keep a backup when switching
-                  devices or site addresses.
-                </p>
-                <div className="button-row">
-                  <button
-                    className="secondary"
-                    onClick={() =>
-                      download(
-                        new Blob([JSON.stringify(data, null, 2)], {
-                          type: "application/json",
-                        }),
-                        "study-journal-backup.json",
-                      )
-                    }
-                  >
-                    <Download size={16} />
-                    Export journal
-                  </button>
-                  <button
-                    className="secondary"
-                    onClick={() => file.current?.click()}
-                  >
-                    <Upload size={16} />
-                    Import journal
-                  </button>
+            <div className="settings">
+              <section className="panel settings-group">
+                <h2 className="panel-title">Your data</h2>
+                <div className="setting-row">
+                  <div>
+                    <strong>Backup</strong>
+                    <p>
+                      Entries stay in this browser. Clearing browser data
+                      removes them, so keep a backup.
+                    </p>
+                  </div>
+                  <div className="setting-actions">
+                    <button
+                      className="secondary"
+                      onClick={() =>
+                        download(
+                          new Blob([JSON.stringify(data, null, 2)], {
+                            type: "application/json",
+                          }),
+                          `studify-backup-${today}.json`,
+                        )
+                      }
+                    >
+                      <Download size={15} />
+                      Export
+                    </button>
+                    <button
+                      className="secondary"
+                      onClick={() => file.current?.click()}
+                    >
+                      <Upload size={15} />
+                      Import
+                    </button>
+                  </div>
                 </div>
                 <input
                   hidden
@@ -1128,56 +1329,65 @@ export default function Journal() {
                       }
                     } catch {
                       setError(
-                        "Choose a valid version 2 journal backup under 10 MB. Earlier tracker backups belong in the earlier tracker.",
+                        "Choose a valid Studify backup under 10 MB.",
                       );
                     }
                     e.target.value = "";
                   }}
                 />
-                <h2 className="spaced">Earlier study records</h2>
-                <p>
-                  Your previous courses, sessions, grades, and exports remain in
-                  the earlier tracker. They haven’t been converted into invented
-                  journal reflections.
-                </p>
-                <a className="secondary" href="/history">
-                  Open earlier tracker <ArrowRight size={14} />
-                </a>
               </section>
-              <section className="card settings-journal">
-                <h2>AI reflection</h2>
-                <label className="consent"><input type="checkbox" checked={autoReflect} onChange={(event) => rememberAiPermission(event.target.checked)}/>Automatically send saved entries and their study context to OpenAI for reflection.</label>
-                <p className="ai-disclosure">Applies to entries you save or edit after enabling this. Turning it off stops automatic requests. Existing reflections stay in your journal.</p>
-                <p>
-                  {available
-                    ? "AI reflection is connected."
-                    : "AI reflection is not connected yet."}{" "}
-                  Saving entries and your own takeaways always works without AI.
+              <section className="panel settings-group">
+                <h2 className="panel-title">AI reflection</h2>
+                <label className="setting-row">
+                  <div>
+                    <strong>Reflect automatically</strong>
+                    <p>
+                      Send saved entries to OpenAI for reflection. Applies to
+                      entries you save after turning it on; existing
+                      reflections stay.
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="switch"
+                    checked={autoReflect}
+                    onChange={(event) => rememberAiPermission(event.target.checked)}
+                  />
+                </label>
+                <div className="setting-row">
+                  <div>
+                    <strong>Connection</strong>
+                    <p>Saving entries and takeaways always works without AI.</p>
+                  </div>
+                  <span className={`status-pill${available ? " on" : ""}`}>
+                    {available ? "Connected" : "Not connected"}
+                  </span>
+                </div>
+                <p className="setting-note">
+                  Each entry sent includes its notes, topic, course, location,
+                  methods, and duration — never GPS. Requests are made with
+                  storage disabled; OpenAI’s own policies still apply.
+                  Suggestions are interpretations, not verified outcomes. Edit,
+                  correct, or ignore them.
                 </p>
-                <p>
-                  With automatic reflection enabled, each entry you save is sent to OpenAI with its study context. Existing entries are not sent in the background. No GPS is collected. API responses are requested with storage disabled; the provider’s data policies still apply.
-                </p>
-                <p>
-                  AI suggestions are interpretations, not verified learning
-                  outcomes. You can edit your conclusion, respond with
-                  corrections, or ignore the suggestion.
-                </p>
-                <h2 className="spaced">Explore a sample</h2>
-                <p>
-                  Sample entries are separate from your journal. Their next
-                  steps are examples written for the demo.
-                </p>
-                <button className="secondary" onClick={toggleDemo}>
-                  {demo ? "Exit sample journal" : "Explore sample journal"}
-                </button>
+              </section>
+              <section className="panel settings-group">
+                <h2 className="panel-title">Sample journal</h2>
+                <div className="setting-row">
+                  <div>
+                    <strong>Explore a sample</strong>
+                    <p>Sample entries are separate from your journal.</p>
+                  </div>
+                  <button className="secondary" onClick={toggleDemo}>
+                    {demo ? "Exit sample" : "Open sample"}
+                  </button>
+                </div>
               </section>
             </div>
           )}
           <footer className="journal-footer">
-            <span>
-              Journal entries and takeaways are saved in this browser.
-            </span>
-            <span>Study Journal · {demo ? "Demo" : "Device-local"}</span>
+            <span>Saved in this browser.</span>
+            <span>Studify · {demo ? "Demo" : "Device-local"}</span>
           </footer>
         </main>
       </div>
@@ -1206,7 +1416,7 @@ export default function Journal() {
             <p className="eyebrow">{editing ? "EDIT ENTRY" : "LOG A SESSION"} · STEP {step + 1} OF 4</p>
             <h2 id="entry-heading">{["What did you work on?", "Where and how?", "How did it go?", "Review your entry"][step]}</h2>
             <p className="subtitle">
-              {["Add a topic. Course and duration are optional.", "Choose a location and the methods you used.", "Write a few thoughts about what helped or got in the way.", "Check your answers, then save."][step]}
+              {["Course and duration are optional.", "Where and how you studied.", "What helped, what got in the way.", "Check your answers, then save."][step]}
             </p>
           </div>
           <button
@@ -1237,7 +1447,7 @@ export default function Journal() {
               required
               maxLength={200}
               defaultValue={editing?.context || ""}
-              placeholder="e.g. Understanding when to use integration by parts"
+              placeholder="e.g. When to use integration by parts"
             />
           </label>
           <div className="form-grid">
@@ -1248,7 +1458,7 @@ export default function Journal() {
                 maxLength={100}
                 list="journal-courses"
                 defaultValue={editing?.course || ""}
-                placeholder="Choose or type a new subject"
+                placeholder="Choose or type one"
               />
               <datalist id="journal-courses">
                 <option>Independent study</option>
@@ -1368,7 +1578,7 @@ export default function Journal() {
               required
               maxLength={3000}
               defaultValue={editing?.reflection || ""}
-              placeholder="What felt useful? What was difficult or distracting? What feels clearer—or still unresolved?"
+              placeholder="What felt useful? What was hard? What’s still unclear?"
               rows={4}
             />
           </label>
@@ -1380,13 +1590,13 @@ export default function Journal() {
             <div><dt>Reflection</dt><dd>{review.reflection}</dd></div>
           </dl>
           {!autoReflect && available && <label className="consent"><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)}/>
-            Automatically send each entry’s notes, topic, course, location, study methods, and duration to OpenAI for reflection when I save. Remember on this device; change in Settings.
+            Send each entry and its context to OpenAI for reflection when I save. Change this anytime in Settings.
           </label>}
-          <p className="connection-note">{!available ? "AI isn’t connected yet. Your entry will save without a reflection; nothing will be sent automatically later." : autoReflect || consent ? "Your entry saves first, then AI reflects on it. You can correct its interpretation afterward." : "Allow AI reflection above to get feedback automatically, or save your entry without it."}</p>
+          <p className="connection-note">{!available ? "AI isn’t connected. Your entry saves without a reflection." : autoReflect || consent ? "Your entry saves first, then AI reflects on it — correct it afterward." : "Allow AI above for feedback, or save without it."}</p>
           {editing && (
             <p className="ai-disclosure">
-              Editing clears the previous AI interpretation and reply; your own
-              takeaway and next step are kept.
+              Editing clears the AI reflection and reply; your takeaway and next
+              step stay.
             </p>
           )}
           </section>

@@ -63,7 +63,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error:
-          "AI reflection is not connected yet. Your entry is saved; you can write your own takeaway below.",
+          "AI isn’t connected. Your entry is saved; write your own takeaway.",
       },
       { status: 503 },
     );
@@ -100,7 +100,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            "Today’s AI allowance has been reached. You can still save and reflect on your own.",
+            "Today’s AI limit is reached. You can still save and reflect on your own.",
         },
         { status: 429 },
       );
@@ -176,7 +176,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error:
-          "AI reflection is unavailable right now. Your saved journal is safe; please try later.",
+          "AI is unavailable right now. Your journal is safe — try again later.",
       },
       { status: 502 },
     );

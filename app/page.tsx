@@ -1,4 +1,4 @@
-import Journal from "@/components/journal";
+import Landing from "@/components/landing";
 export default function Page() {
-  return <Journal />;
+  return <Landing />;
 }

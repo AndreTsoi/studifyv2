@@ -1,10 +1,18 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./journal.css";
+import "./landing.css";
 export const metadata: Metadata = {
-  title: "Study Journal — A clearer next step",
+  title: {
+    default: "Studify — Your personal study journal",
+    template: "%s · Studify",
+  },
   description:
-    "A study journal that helps you understand what is working. Reflect on your sessions, explore your habits, and choose a clearer next step.",
+    "Reflect on your study sessions, see what is working, and choose a clearer next step.",
+  applicationName: "Studify",
+};
+export const viewport: Viewport = {
+  themeColor: "#1a1a1a",
 };
 export default function RootLayout({
   children,
